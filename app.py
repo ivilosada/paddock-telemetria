@@ -5,6 +5,7 @@ import base64
 import time
 import pandas as pd
 from groq import Groq
+from pilotos_fe import PILOTOS_FE, CHAMPIONSHIP_ID, EVENT_ID_BERLIN
 
 st.set_page_config(
     page_title="Paddock y Pluma — Telemetría",
@@ -540,66 +541,157 @@ y qué importancia estratégica tiene en la carrera."""
     else:
         st.warning("No se pudo cargar la sesión. Comprueba tu conexión.")
 
-# ── BLOQUE FORMULA E ──────────────────────────────────────────────────────────
-
 elif categoria == "Formula E":
-    st.subheader("⚡ Panel de Formula E — Entrada manual de datos")
-    st.info("Introduce los datos de la carrera manualmente. La IA generará el relato en tiempo real.")
 
-    EPRIX_2026 = [
-        "ePrix de São Paulo (R1)", "ePrix de Ciudad de México (R2)", "ePrix de Miami (R3)",
-        "ePrix de Yeda I (R4)", "ePrix de Yeda II (R5)", "ePrix de Madrid — Jarama (R6)",
-        "ePrix de Berlín I (R7)", "ePrix de Berlín II (R8)", "ePrix de Mónaco I (R9)",
-        "ePrix de Mónaco II (R10)", "ePrix de Sanya (R11)", "ePrix de Shanghái I (R12)",
-        "ePrix de Shanghái II (R13)", "ePrix de Tokio I (R14)", "ePrix de Tokio II (R15)",
-        "ePrix de Londres I (R16)", "ePrix de Londres II (R17)",
-    ]
+    def obtener_standings_fe():
+        url = "https://stats-centre.fiaformulae.com/prod/api/realtime/standings"
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                return r.json().get("data", {}).get("standings", {})
+        except:
+            pass
+        return {}
 
-    with st.form("panel_fe"):
-        nombre_eprix = st.selectbox("Selecciona el ePrix", EPRIX_2026)
-        st.markdown("#### 🏁 Top 10 — Posiciones y gaps")
-        pilotos_fe = []
-        col_nombres, col_equipos, col_gaps, col_energia = st.columns(4)
-        col_nombres.markdown("**Piloto**")
-        col_equipos.markdown("**Equipo**")
-        col_gaps.markdown("**Gap al líder**")
-        col_energia.markdown("**Energía restante (%)**")
-        for i in range(1, 11):
-            c1, c2, c3, c4 = st.columns(4)
-            nombre_fe = c1.text_input(f"P{i}", placeholder=f"Nombre piloto P{i}", key=f"nombre_{i}", label_visibility="collapsed")
-            equipo_fe = c2.text_input(f"Equipo P{i}", placeholder="Equipo", key=f"equipo_{i}", label_visibility="collapsed")
-            gap_fe = c3.text_input(f"Gap P{i}", placeholder="+0.000 / Líder", key=f"gap_{i}", label_visibility="collapsed")
-            energia_fe = c4.number_input(f"Energía P{i}", min_value=0, max_value=100, value=50, key=f"energia_{i}", label_visibility="collapsed")
-            pilotos_fe.append({"posicion": i, "nombre": nombre_fe, "equipo": equipo_fe, "gap": gap_fe, "energia": energia_fe})
+    def obtener_mejores_vueltas_fe():
+        url = f"https://stats-centre.fiaformulae.com/prod/api/details/best-lap-timings?championshipId={CHAMPIONSHIP_ID}&eventId={EVENT_ID_BERLIN}"
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                if data:
+                    return data[0].get("participants", {})
+        except:
+            pass
+        return {}
 
-        st.markdown("#### Datos extra de carrera")
-        col_ex1, col_ex2 = st.columns(2)
-        vuelta_actual = col_ex1.number_input("Vuelta actual", min_value=1, max_value=60, value=1)
-        total_vueltas = col_ex2.number_input("Total de vueltas", min_value=1, max_value=60, value=30)
-        col_ex3, col_ex4 = st.columns(2)
-        coche_seguridad = col_ex3.checkbox("Safety Car activo")
-        attack_mode = col_ex4.text_input("Attack Mode activado por", placeholder="Ej: Vergne, Nato")
-        incidencias = st.text_area("📝 Incidencias / Notas manuales", placeholder="Penalizaciones, adelantamientos clave, abandonos...")
-        enviado = st.form_submit_button("Generar relato IA")
+    def obtener_sectores_fe():
+        url = f"https://stats-centre.fiaformulae.com/prod/api/details/sectortiming?championshipId={CHAMPIONSHIP_ID}&eventId={EVENT_ID_BERLIN}"
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                if data:
+                    return data[0].get("participants", {})
+        except:
+            pass
+        return {}
 
-    if enviado:
-        resumen_pilotos = [
-            f"P{p['posicion']}: {p['nombre']} ({p['equipo']}) — Gap: {p['gap']} — Energía: {p['energia']}%"
-            for p in pilotos_fe if p["nombre"]
-        ]
-        datos_fe_texto = "\n".join(resumen_pilotos)
-        sc_texto = "Hay Safety Car en pista." if coche_seguridad else "No hay Safety Car."
-        attack_texto = f"Attack Mode activado recientemente por: {attack_mode}." if attack_mode else ""
-        prompt_fe = f"""Eres un comentarista experto de Formula E. Estamos en la vuelta {vuelta_actual} de {total_vueltas} del {nombre_eprix}. Clasificación:\n{datos_fe_texto}\n{sc_texto}\n{attack_texto}\nIncidencias: {incidencias if incidencias else 'Ninguna.'}\nGenera un relato apasionado y técnico en 4-5 frases en español, con el tono de un relator de Eurosport."""
-        with st.spinner("⚡ Generando relato..."):
-            respuesta_fe = cliente.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt_fe}],
-                max_tokens=600
-            )
-            st.success(respuesta_fe.choices[0].message.content)
-            if resumen_pilotos:
-                st.markdown("#### Clasificación introducida")
-                df_fe = pd.DataFrame([p for p in pilotos_fe if p["nombre"]])
-                df_fe.columns = ["Pos", "Piloto", "Equipo", "Gap", "Energía (%)"]
-                st.dataframe(df_fe, use_container_width=True)
+    def ms_a_tiempo(ms):
+        if not ms:
+            return "—"
+        segundos = ms / 1000
+        minutos = int(segundos // 60)
+        segs = segundos % 60
+        return f"{minutos}:{segs:06.3f}" if minutos > 0 else f"{segs:.3f}s"
+
+    st.subheader("Berlin E-Prix 2026 — En directo")
+
+    col_live1, col_live2 = st.columns([1, 3])
+    with col_live1:
+        modo_directo_fe = st.toggle("Modo en directo", key="live_fe")
+    with col_live2:
+        if modo_directo_fe:
+            st.caption("Refrescando cada 30 segundos automáticamente.")
+
+    standings = obtener_standings_fe()
+    mejores_vueltas_fe = obtener_mejores_vueltas_fe()
+    sectores_fe = obtener_sectores_fe()
+
+    if standings:
+        st.subheader("Clasificación en tiempo real")
+
+        col1, col2, col3, col4, col5, col6 = st.columns([1, 3, 2, 2, 2, 2])
+        col1.markdown("**Pos**")
+        col2.markdown("**Piloto**")
+        col3.markdown("**Equipo**")
+        col4.markdown("**Gap**")
+        col5.markdown("**Mejor vuelta**")
+        col6.markdown("**Cambio pos.**")
+
+        for pos_key in sorted(standings.keys(), key=lambda x: int(x)):
+            entrada = standings[pos_key]
+            participante = str(entrada.get("participant", ""))
+            piloto_info = PILOTOS_FE.get(participante, {"nombre": f"#{participante}", "equipo": "—"})
+            posicion = entrada.get("position", "—")
+            gap = entrada.get("gapFirstTime", 0)
+            cambio = entrada.get("positionChange", 0)
+            mejor_vuelta = mejores_vueltas_fe.get(participante, {}).get("best_lap_time")
+
+            gap_str = "Líder" if posicion == 1 else f"+{gap/1000:.3f}s" if gap else "—"
+            tiempo_str = ms_a_tiempo(mejor_vuelta)
+            cambio_str = f"▲{cambio}" if cambio > 0 else f"▼{abs(cambio)}" if cambio < 0 else "—"
+
+            col1, col2, col3, col4, col5, col6 = st.columns([1, 3, 2, 2, 2, 2])
+            col1.write(posicion)
+            col2.write(piloto_info["nombre"])
+            col3.write(piloto_info["equipo"])
+            col4.write(gap_str)
+            col5.write(tiempo_str)
+            col6.write(cambio_str)
+
+        st.markdown("---")
+
+        if sectores_fe:
+            st.subheader("Mejores tiempos por sector")
+            filas_sec = []
+            for num, datos in sectores_fe.items():
+                piloto_info = PILOTOS_FE.get(str(num), {"nombre": f"#{num}", "equipo": "—"})
+                s1 = datos.get("1")
+                s2 = datos.get("2")
+                s3 = datos.get("3")
+                filas_sec.append({
+                    "Piloto": piloto_info["nombre"],
+                    "S1": f"{s1/1000:.3f}s" if s1 else "—",
+                    "S2": f"{s2/1000:.3f}s" if s2 else "—",
+                    "S3": f"{s3/1000:.3f}s" if s3 else "—",
+                })
+            if filas_sec:
+                df_sec_fe = pd.DataFrame(filas_sec)
+                st.dataframe(df_sec_fe, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        st.subheader("Ingeniero de Carrera IA")
+
+        if st.button("Analizar sesión FE"):
+            resumen_fe = []
+            for pos_key in sorted(standings.keys(), key=lambda x: int(x))[:10]:
+                entrada = standings[pos_key]
+                participante = str(entrada.get("participant", ""))
+                piloto_info = PILOTOS_FE.get(participante, {"nombre": f"#{participante}", "equipo": "—"})
+                posicion = entrada.get("position", "—")
+                gap = entrada.get("gapFirstTime", 0)
+                mejor_vuelta = mejores_vueltas_fe.get(participante, {}).get("best_lap_time")
+                gap_str = "Líder" if posicion == 1 else f"+{gap/1000:.3f}s" if gap else "—"
+                tiempo_str = ms_a_tiempo(mejor_vuelta)
+                resumen_fe.append(f"P{posicion}: {piloto_info['nombre']} ({piloto_info['equipo']}) — Gap: {gap_str} — Mejor vuelta: {tiempo_str}")
+
+            datos_fe_texto = "\n".join(resumen_fe)
+
+            prompt_fe = f"""Eres un comentarista experto de Formula E con conocimiento técnico profundo del campeonato.
+Estos son los datos en tiempo real del Berlin E-Prix 2026:
+
+{datos_fe_texto}
+
+Genera un análisis apasionado y técnico en 4-5 frases. Menciona la batalla por el liderato,
+los gaps entre pilotos, quién parece tener mejor ritmo y qué puede pasar en la carrera.
+Habla en español, con el tono de un comentarista experto de Eurosport."""
+
+            with st.spinner("Analizando sesión de Formula E..."):
+                respuesta_fe = cliente.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt_fe}],
+                    max_tokens=600
+                )
+                st.success(respuesta_fe.choices[0].message.content)
+
+    else:
+        st.info("No hay datos en tiempo real disponibles. La sesión puede no estar activa.")
+        st.markdown("**Próximas sesiones del Berlin E-Prix:**")
+        st.markdown("- Qualifying Group A y B — Hoy")
+        st.markdown("- Carrera — Mañana")
+
+    if modo_directo_fe:
+        time.sleep(30)
+        st.rerun()
